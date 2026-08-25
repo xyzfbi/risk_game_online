@@ -30,19 +30,26 @@ func main() {
 	defer amqpChannel.Close()
 	fmt.Println("Channel opened successfully!")
 
-	_, queue, err := pubsub.DeclareAndBind(
+	err = pubsub.SubscribeGob(
 		conn,
 		routing.ExchangePerilTopic,
 		routing.GameLogSlug,
-		routing.GameLogSlug+".*",
+		fmt.Sprintf("%s.*", routing.GameLogSlug),
 		pubsub.QueueTypeDurable,
+		func(gl routing.GameLog) pubsub.AckType {
+			err := gamelogic.WriteLog(gl)
+			if err != nil {
+				fmt.Println("Failed to write game log:", err)
+				return pubsub.NackDiscard
+			}
+			return pubsub.Ack
+		},
 	)
 	if err != nil {
-		fmt.Println("Failed to declare and bind queue:", err)
+		fmt.Println("Failed to subscribe to game log messages:", err)
 		return
 	}
-	fmt.Printf("Queue %v declared and bound successfully!\n", queue.Name)
-
+	fmt.Println("Subscribed to game log messages successfully!")
 	gamelogic.PrintServerHelp()
 
 	for {
@@ -51,7 +58,7 @@ func main() {
 			continue
 		}
 		command := input[0]
-		
+
 		switch command {
 		case "pause":
 			fmt.Println("Pausing the game...")

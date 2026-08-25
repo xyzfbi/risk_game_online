@@ -12,13 +12,13 @@ import (
 )
 
 func publishGameLog(ch *amqp.Channel, username, msg string) pubsub.AckType {
-	log := routing.GameLog{
+	logData := routing.GameLog{
 		CurrentTime: time.Now(),
 		Message:     msg,
 		Username:    username,
 	}
 	key := fmt.Sprintf("%s.%s", routing.GameLogSlug, username)
-	err := pubsub.PublishGob(ch, routing.ExchangePerilTopic, key, log)
+	err := pubsub.PublishGob(ch, routing.ExchangePerilTopic, key, logData)
 	if err != nil {
 		fmt.Printf("could not publish game log: %v\n", err)
 		return pubsub.NackRequeue
@@ -41,7 +41,7 @@ func handlerWar(gs *gamelogic.GameState, ch *amqp.Channel) func(dw gamelogic.Rec
 
 		switch outcome {
 		case gamelogic.WarOutcomeNotInvolved:
-			return pubsub.NackRequeue
+			return pubsub.NackDiscard
 
 		case gamelogic.WarOutcomeNoUnits:
 			return pubsub.NackDiscard
@@ -75,9 +75,11 @@ func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel, username string) fun
 		switch outcome {
 		case gamelogic.MoveOutcomeSamePlayer:
 			return pubsub.NackDiscard
+
 		case gamelogic.MoveOutComeSafe:
 			fmt.Printf("Move successful! You now have %d armies in territory %s\n", len(am.Units), am.ToLocation)
 			return pubsub.Ack
+
 		case gamelogic.MoveOutcomeMakeWar:
 			err := pubsub.PublishJSON(
 				ch,
@@ -93,6 +95,7 @@ func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel, username string) fun
 				return pubsub.NackRequeue
 			}
 			return pubsub.Ack
+
 		default:
 			return pubsub.NackDiscard
 		}
@@ -100,7 +103,6 @@ func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel, username string) fun
 }
 
 func main() {
-
 	fmt.Println("Starting Peril client...")
 	const rabbitConnString = "amqp://guest:guest@localhost:5672/"
 
@@ -123,8 +125,9 @@ func main() {
 	}
 
 	gs := gamelogic.NewGameState(username)
-	pauseQueueName := fmt.Sprintf("%s.%s", routing.PauseKey, username)
 
+	// 1. Подписка на паузу
+	pauseQueueName := fmt.Sprintf("%s.%s", routing.PauseKey, username)
 	err = pubsub.SubscribeJSON(
 		conn,
 		routing.ExchangePerilDirect,
@@ -138,11 +141,9 @@ func main() {
 	}
 	fmt.Println("Subscribed to pause messages!")
 
+	// 2. Подписка на ходы
 	moveQueueName := fmt.Sprintf("%s.%s", routing.ArmyMovesPrefix, username)
 	moveRoutingKey := fmt.Sprintf("%s.*", routing.ArmyMovesPrefix)
-	warQueueName := "war"
-	warRoutingKey := fmt.Sprintf("%s.*", routing.WarRecognitionsPrefix)
-
 	err = pubsub.SubscribeJSON(
 		conn,
 		routing.ExchangePerilTopic,
@@ -151,19 +152,27 @@ func main() {
 		pubsub.QueueTypeTransient,
 		handlerMove(gs, ch, username),
 	)
+	if err != nil {
+		log.Fatalf("could not subscribe to move messages: %v", err)
+	}
+	fmt.Println("Subscribed to move messages!")
+
+	// 3. Подписка на войну
+	warQueueName := fmt.Sprintf("%s.%s", routing.WarRecognitionsPrefix, username)
+	warRoutingKey := fmt.Sprintf("%s.*", routing.WarRecognitionsPrefix)
 
 	err = pubsub.SubscribeJSON(
 		conn,
 		routing.ExchangePerilTopic,
 		warQueueName,
 		warRoutingKey,
-		pubsub.QueueTypeDurable,
+		pubsub.QueueTypeTransient,
 		handlerWar(gs, ch),
 	)
 	if err != nil {
-		log.Fatalf("could not subscribe to move messages: %v", err)
+		log.Fatalf("could not subscribe to war messages: %v", err)
 	}
-	fmt.Println("Subscribed to move messages!")
+	fmt.Println("Subscribed to war messages!")
 
 	for {
 		words := gamelogic.GetInput()
@@ -187,9 +196,8 @@ func main() {
 			if err != nil {
 				fmt.Printf("could not publish move: %v\n", err)
 			}
-			fmt.Printf("Published move successfully!")
+			fmt.Println("Published move successfully!")
 
-			// TODO: publish the move
 		case "spawn":
 			err = gs.CommandSpawn(words)
 			if err != nil {
@@ -201,7 +209,6 @@ func main() {
 		case "help":
 			gamelogic.PrintClientHelp()
 		case "spam":
-			// TODO: publish n malicious logs
 			fmt.Println("Spamming not allowed yet!")
 		case "quit":
 			gamelogic.PrintQuit()

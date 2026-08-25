@@ -22,12 +22,7 @@ func (gs *GameState) HandleWar(rw RecognitionOfWar) (outcome WarOutcome, winner 
 
 	player := gs.GetPlayerSnap()
 
-	if player.Username == rw.Defender.Username {
-		fmt.Printf("%s, you published the war.\n", player.Username)
-		return WarOutcomeNotInvolved, "", ""
-	}
-
-	if player.Username != rw.Attacker.Username {
+	if player.Username != rw.Attacker.Username && player.Username != rw.Defender.Username {
 		fmt.Printf("%s, you are not involved in this war.\n", player.Username)
 		return WarOutcomeNotInvolved, "", ""
 	}
@@ -59,10 +54,13 @@ func (gs *GameState) HandleWar(rw RecognitionOfWar) (outcome WarOutcome, winner 
 	for _, unit := range defenderUnits {
 		fmt.Printf("  * %v\n", unit.Rank)
 	}
+	
 	attackerPower := unitsToPowerLevel(attackerUnits)
 	defenderPower := unitsToPowerLevel(defenderUnits)
+	
 	fmt.Printf("Attacker has a power level of %v\n", attackerPower)
 	fmt.Printf("Defender has a power level of %v\n", defenderPower)
+	
 	if attackerPower > defenderPower {
 		fmt.Printf("%s has won the war!\n", rw.Attacker.Username)
 		if player.Username == rw.Defender.Username {
@@ -82,6 +80,7 @@ func (gs *GameState) HandleWar(rw RecognitionOfWar) (outcome WarOutcome, winner 
 		}
 		return WarOutcomeYouWon, rw.Defender.Username, rw.Attacker.Username
 	}
+	
 	fmt.Println("The war ended in a draw!")
 	fmt.Printf("Your units in %s have been killed.\n", overlappingLocation)
 	gs.removeUnitsInLocation(overlappingLocation)
