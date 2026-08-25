@@ -7,7 +7,7 @@ import (
 type SimpleQueueType int
 
 const (
-	QueueTypeDurable   SimpleQueueType = iota
+	QueueTypeDurable SimpleQueueType = iota
 	QueueTypeTransient
 )
 
@@ -20,9 +20,14 @@ func DeclareAndBind(
 	key string,
 	queueType SimpleQueueType,
 ) (*amqp.Channel, amqp.Queue, error) {
-	ch , err := conn.Channel()
+
+	ch, err := conn.Channel()
 	if err != nil {
 		return nil, amqp.Queue{}, err
+	}
+
+	args := amqp.Table{
+		"x-dead-letter-exchange": "peril_dlx",
 	}
 
 	durable := queueType == QueueTypeDurable
@@ -35,7 +40,7 @@ func DeclareAndBind(
 		autoDelete,
 		exclusive,
 		false,
-		nil,
+		args,
 	)
 	if err != nil {
 		return nil, amqp.Queue{}, err
